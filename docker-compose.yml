@@ -1,0 +1,17 @@
+version: '3'
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    restart: always
+    environment: 
+      # Enable one of these to use MySQL or Redis
+      - DB=mysql://root:@tcp(sqldb:3306)/todo      
+      # - DB=redis://redis:6379
+  sqldb:
+    build: 
+      context: .
+      dockerfile: Dockerfile.mysql    
+  redis:
+    image: redis:6-alpine

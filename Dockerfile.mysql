@@ -1,0 +1,5 @@
+FROM mysql 
+
+ENV MYSQL_ALLOW_EMPTY_PASSWORD yes
+ENV MYSQL_DATABASE=todo
+COPY ./schema.sql /docker-entrypoint-initdb.d/
