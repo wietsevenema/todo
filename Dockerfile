@@ -3,7 +3,7 @@ FROM node:stretch AS build-node
 WORKDIR /app
 
 COPY web/package*.json ./
-RUN npm install 
+RUN npm ci --quiet 
 
 COPY web/ .
 RUN npx parcel build index.html --no-source-maps
