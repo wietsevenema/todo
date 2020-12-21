@@ -8,11 +8,11 @@ type Todo struct {
 }
 
 type Store interface {
-	Connect() (bool, error)
-	Create(todo *Todo) error
-	Clear() error
-	Get(id string) (*Todo, error)
-	Update(id string, todo *Todo) (*Todo, error)
-	Delete(id string) error
-	List() ([]Todo, error)
+	Connect() error
+	Create(list string, todo *Todo) error
+	Clear(list string) error
+	Get(list string, id string) (*Todo, error)
+	Update(list string, id string, todo *Todo) (*Todo, error)
+	Delete(list string, id string) error
+	List(list string) ([]Todo, error)
 }

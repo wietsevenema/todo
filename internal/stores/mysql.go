@@ -3,7 +3,6 @@ package stores
 import (
 	"database/sql"
 	"strconv"
-	"strings"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -19,16 +18,11 @@ func NewSQLStore(dbURL string) *SQLStore {
 	return &s
 }
 
-func (s *SQLStore) Connect() (bool, error) {
-	if !strings.HasPrefix(s.DBUrl, "mysql://") {
-		return false, nil
-	}
-	dbUrl := strings.TrimPrefix(s.DBUrl, "mysql://")
-
-	db, err := sql.Open("mysql", dbUrl)
+func (s *SQLStore) Connect() error {
+	db, err := sql.Open("mysql", s.DBUrl)
 
 	if err != nil {
-		return true, err
+		return err
 	}
 
 	db.SetConnMaxLifetime(time.Minute * 3)
@@ -39,13 +33,13 @@ func (s *SQLStore) Connect() (bool, error) {
 
 	err = db.Ping()
 	if err != nil {
-		return true, err
+		return err
 	}
 
-	return true, nil
+	return nil
 }
 
-func (s SQLStore) Create(t *Todo) error {
+func (s SQLStore) Create(_ string, t *Todo) error {
 	stmt, err := s.DB.Prepare(`INSERT INTO todos(title, completed, sortOrder) VALUES (
 		?,
 		?, 
@@ -66,7 +60,7 @@ func (s SQLStore) Create(t *Todo) error {
 	return nil
 }
 
-func (s SQLStore) Delete(id string) error {
+func (s SQLStore) Delete(_ string, id string) error {
 	stmt, err := s.DB.Prepare("DELETE FROM todos WHERE id=?")
 	if err != nil {
 		return err
@@ -78,8 +72,8 @@ func (s SQLStore) Delete(id string) error {
 	return nil
 }
 
-func (s SQLStore) Update(id string, newT *Todo) (*Todo, error) {
-	t, err := s.Get(id)
+func (s SQLStore) Update(listID string, id string, newT *Todo) (*Todo, error) {
+	t, err := s.Get(listID, id)
 	if err != nil {
 		return nil, err
 	}
@@ -93,12 +87,13 @@ func (s SQLStore) Update(id string, newT *Todo) (*Todo, error) {
 		stmt, err := s.DB.Prepare(`UPDATE todos SET 
 			title = ?, 
 			completed = ?, 
-			sortOrder = ?`)
+			sortOrder = ?
+			WHERE id=?`)
 
 		if err != nil {
 			return nil, err
 		}
-		_, err = stmt.Exec(t.Title, t.Completed, t.Order)
+		_, err = stmt.Exec(t.Title, t.Completed, t.Order, id)
 		if err != nil {
 			return nil, err
 		}
@@ -108,7 +103,7 @@ func (s SQLStore) Update(id string, newT *Todo) (*Todo, error) {
 	return nil, nil
 }
 
-func (s SQLStore) Get(id string) (*Todo, error) {
+func (s SQLStore) Get(_ string, id string) (*Todo, error) {
 	rows, err := s.DB.Query("select id, title, completed, sortOrder from todos where id=?", id)
 	if err != nil {
 		return nil, err
@@ -128,7 +123,7 @@ func (s SQLStore) Get(id string) (*Todo, error) {
 	return &t, nil
 }
 
-func (s SQLStore) Clear() error {
+func (s SQLStore) Clear(_ string) error {
 	stmt, err := s.DB.Prepare("DELETE FROM todos")
 	if err != nil {
 		return err
@@ -140,7 +135,7 @@ func (s SQLStore) Clear() error {
 	return nil
 }
 
-func (s SQLStore) List() ([]Todo, error) {
+func (s SQLStore) List(_ string) ([]Todo, error) {
 	rows, err := s.DB.Query("select id, title, completed, sortOrder from todos")
 	if err != nil {
 		return nil, err

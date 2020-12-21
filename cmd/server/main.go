@@ -1,16 +1,17 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
-	"reflect"
+	"strings"
 
 	"github.com/gorilla/mux"
+	"github.com/gorilla/sessions"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/yfuruyama/crzerolog"
 
+	"github.com/wietsevenema/todo/internal/handler"
 	"github.com/wietsevenema/todo/internal/stores"
 
 	"net/http"
@@ -24,128 +25,25 @@ func port() string {
 	return port
 }
 
-func jsonHeader(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-
-		// w.Header().Add("access-control-allow-origin", "*")
-		// w.Header().Add("access-control-allow-headers", "*")
-		// w.Header().Add("access-control-allow-methods", "*")
-
-		w.Header().Add("content-type", "application/json")
-		next.ServeHTTP(w, r)
-	})
+func getURL() ([]string, error) {
+	dbURL := os.Getenv("DB")
+	split := strings.SplitN(dbURL, "://", 2)
+	if len(split) != 2 {
+		return nil, fmt.Errorf("Invalid DB env var")
+	}
+	return split, nil
 }
 
-type service struct {
-	store stores.Store
-}
-
-type todoWithURL struct {
-	Title     string `json:"title"`
-	Completed bool   `json:"completed"`
-	Order     int    `json:"order"`
-	URL       string `json:"url"`
-}
-
-func addURL(t stores.Todo) todoWithURL {
-	tU := todoWithURL{
-		Title:     t.Title,
-		Completed: t.Completed,
-		Order:     t.Order,
-		URL:       "/" + t.ID,
-		// URL:       "http://localhost:8080/api/todo/" + t.ID,
+func newSessionStore() *sessions.CookieStore {
+	key := os.Getenv("SECRET_SESSION_KEY")
+	var bkey []byte
+	if key == "" {
+		log.Error().Msg("Set env var SECRET_SESSION_KEY to secure sessions")
+		bkey = []byte("secret")
+	} else {
+		bkey = []byte(key)
 	}
-	return tU
-}
-
-func (s *service) List(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	list, err := s.store.List()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	result := []todoWithURL{}
-	for _, t := range list {
-		result = append(result, addURL(t))
-	}
-	json.NewEncoder(w).Encode(result)
-}
-
-func (s *service) Clear(w http.ResponseWriter, r *http.Request) {
-	s.store.Clear()
-	s.List(w, r)
-}
-
-func (s *service) Delete(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	id := vars["id"]
-	err := s.store.Delete(id)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-}
-
-func (s *service) Update(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	id := vars["id"]
-
-	decoder := json.NewDecoder(r.Body)
-
-	var newT stores.Todo
-	err := decoder.Decode(&newT)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	res, err := s.store.Update(id, &newT)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	if res == nil {
-		w.WriteHeader(http.StatusNotFound)
-		return
-	}
-	json.NewEncoder(w).Encode(addURL(*res))
-}
-
-func (s *service) Get(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	t, err := s.store.Get(vars["id"])
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if t != nil {
-		json.NewEncoder(w).Encode(addURL(*t))
-		return
-	}
-	w.WriteHeader(http.StatusNotFound)
-
-}
-
-func (s *service) Create(w http.ResponseWriter, r *http.Request) {
-	decoder := json.NewDecoder(r.Body)
-	var t stores.Todo
-	err := decoder.Decode(&t)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	err = s.store.Create(&t)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	json.NewEncoder(w).Encode(addURL(t)) // Can have no id when using auto increment (switch to uuid)
-}
-
-func connectStore(dbURL string) {
-
+	return sessions.NewCookieStore(bkey)
 }
 
 func main() {
@@ -155,35 +53,37 @@ func main() {
 	r := mux.NewRouter()
 	r.Use(middleware)
 
-	var s service
-	dbURL := os.Getenv("DB")
+	s := handler.Service{SessionStore: newSessionStore()}
 
-	var m stores.Store
-
-	m = stores.NewSQLStore(dbURL)
-	accept, err := m.Connect()
+	dbURL, err := getURL()
 	if err != nil {
-		log.Warn().Err(err).Msg("Failed to connect to MySQL")
+		rootLogger.Warn().Err(err).Msg("Invalid env var DB")
+		dbURL = []string{"memory"}
 	}
 
-	if accept != true {
-		m = stores.NewRedisStore(dbURL)
-		accept, err := m.Connect()
+	switch dbURL[0] {
+	case "mysql":
+		log.Info().Msg("Connecting with MySQL")
+		s.Store = stores.NewSQLStore(dbURL[1])
+		err := s.Store.Connect()
+		if err != nil {
+			log.Warn().Err(err).Msg("Failed to connect to MySQL")
+		}
+	case "redis":
+		log.Info().Msg("Connecting with Redis")
+		s.Store = stores.NewRedisStore(dbURL[1])
+		err := s.Store.Connect()
 		if err != nil {
 			log.Warn().Err(err).Msg("Failed to connect to Redis")
 		}
-
-		if !accept {
-			log.Info().Msg("Storing data in memory (not persistent)")
-			m := stores.NewMemory()
-			m.Connect()
-		}
+	default:
+		log.Info().Msg("Storing data in memory (not persistent!)")
+		s.Store = stores.NewMemory()
 	}
-	log.Info().Msg(fmt.Sprintf("Connected with %v", reflect.TypeOf(m)))
-	s = service{m}
 
 	api := r.PathPrefix("/api").Subrouter()
-	api.Use(jsonHeader)
+	api.Use(handler.JsonHeader)
+	api.Use(s.SessionHandler)
 	api.Methods(http.MethodOptions).HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNoContent)

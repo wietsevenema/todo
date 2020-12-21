@@ -2,7 +2,7 @@ package stores
 
 import (
 	"encoding/json"
-	"strings"
+	"fmt"
 
 	"github.com/go-redis/redis"
 	"github.com/google/uuid"
@@ -18,27 +18,22 @@ func NewRedisStore(dbURL string) *RedisStore {
 	return &r
 }
 
-func (r *RedisStore) Connect() (bool, error) {
-	if !strings.HasPrefix(r.DBUrl, "redis://") {
-		return false, nil
-	}
-	dbUrl := strings.TrimPrefix(r.DBUrl, "redis://")
-
+func (r *RedisStore) Connect() error {
 	r.DB = redis.NewClient(&redis.Options{
-		Addr:     dbUrl,
+		Addr:     r.DBUrl,
 		Password: "",
 		DB:       0,
 	})
 
 	_, err := r.DB.Ping().Result()
 	if err != nil {
-		return true, err
+		return err
 	}
 
-	return true, nil
+	return nil
 }
 
-func (r RedisStore) Create(t *Todo) error {
+func (r RedisStore) Create(listID string, t *Todo) error {
 	id, err := uuid.NewUUID()
 	if err != nil {
 		return err
@@ -50,23 +45,23 @@ func (r RedisStore) Create(t *Todo) error {
 		return err
 	}
 
-	err = r.DB.Set(t.ID, tb, 0).Err()
+	err = r.DB.Set(fmt.Sprintf("%s-%s", listID, t.ID), tb, 0).Err()
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (r RedisStore) Delete(id string) error {
-	err := r.DB.Del(id).Err()
+func (r RedisStore) Delete(listID string, id string) error {
+	err := r.DB.Del(fmt.Sprintf("%s-%s", listID, id)).Err()
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (r RedisStore) Update(id string, newT *Todo) (*Todo, error) {
-	tb, err := r.DB.Get(id).Bytes()
+func (r RedisStore) Update(listID string, id string, newT *Todo) (*Todo, error) {
+	tb, err := r.DB.Get(fmt.Sprintf("%s-%s", listID, id)).Bytes()
 	if err == redis.Nil {
 		return nil, nil
 	}
@@ -88,13 +83,13 @@ func (r RedisStore) Update(id string, newT *Todo) (*Todo, error) {
 		return nil, err
 	}
 
-	err = r.DB.Set(t.ID, tn, 0).Err()
+	err = r.DB.Set(fmt.Sprintf("%s-%s", listID, t.ID), tn, 0).Err()
 	return &t, nil
 
 }
 
-func (r RedisStore) Get(id string) (*Todo, error) {
-	tb, err := r.DB.Get(id).Bytes()
+func (r RedisStore) Get(listID string, id string) (*Todo, error) {
+	tb, err := r.DB.Get(fmt.Sprintf("%s-%s", listID, id)).Bytes()
 	if err == redis.Nil {
 		return nil, nil
 	}
@@ -107,28 +102,35 @@ func (r RedisStore) Get(id string) (*Todo, error) {
 	return &t, nil
 }
 
-func (r RedisStore) Clear() error {
-	_, err := r.DB.FlushDB().Result()
+func (r RedisStore) Clear(listID string) error {
+	keys, err := r.DB.Keys(fmt.Sprintf("%s-*", listID)).Result()
 	if err != nil {
 		return err
+	}
+
+	for _, k := range keys {
+		r.DB.Del(k).Err()
 	}
 	return nil
 }
 
-func (r RedisStore) List() ([]Todo, error) {
-	keys, err := r.DB.Keys("*").Result()
+func (r RedisStore) List(listID string) ([]Todo, error) {
+	keys, err := r.DB.Keys(fmt.Sprintf("%s-*", listID)).Result()
 	if err != nil {
 		return nil, err
 	}
 	result := []Todo{}
 	for _, k := range keys {
-		t, err := r.Get(k)
+		tb, err := r.DB.Get(k).Bytes()
+		if err == redis.Nil {
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
-		if t != nil {
-			result = append(result, *t)
-		}
+		var t Todo
+		json.Unmarshal(tb, &t)
+		result = append(result, t)
 	}
 	return result, nil
 }

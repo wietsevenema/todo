@@ -12,7 +12,7 @@ func NewMemory() *Memory {
 	return &m
 }
 
-func (m Memory) Create(todo *Todo) error {
+func (m Memory) Create(_ string, todo *Todo) error {
 	id, err := uuid.NewUUID()
 	if err != nil {
 		return err
@@ -22,17 +22,17 @@ func (m Memory) Create(todo *Todo) error {
 	return nil
 }
 
-func (m Memory) Connect() (bool, error) {
-	return true, nil
+func (m Memory) Connect() error {
+	return nil
 }
 
-func (m Memory) Delete(id string) error {
+func (m Memory) Delete(_ string, id string) error {
 	delete(m.todos, id)
 	return nil
 }
 
-func (m Memory) Update(id string, newT *Todo) (*Todo, error) {
-	oldT, err := m.Get(id)
+func (m Memory) Update(listID string, id string, newT *Todo) (*Todo, error) {
+	oldT, err := m.Get(listID, id)
 	if err != nil {
 		return nil, err
 	}
@@ -49,19 +49,19 @@ func (m Memory) Update(id string, newT *Todo) (*Todo, error) {
 	return nil, nil
 }
 
-func (m Memory) Get(id string) (*Todo, error) {
+func (m Memory) Get(_ string, id string) (*Todo, error) {
 	t := m.todos[id]
 	return &t, nil
 }
 
-func (m Memory) Clear() error {
+func (m Memory) Clear(_ string) error {
 	for k := range m.todos {
 		delete(m.todos, k)
 	}
 	return nil
 }
 
-func (m Memory) List() ([]Todo, error) {
+func (m Memory) List(_ string) ([]Todo, error) {
 	result := []Todo{}
 	for _, t := range m.todos {
 		result = append(result, t)
